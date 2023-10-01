@@ -68,7 +68,9 @@ func (app *application) Login(w http.ResponseWriter, r *http.Request) {
 	payload = jsonResponse{
 		Error:   false,
 		Message: "logged in",
-		Data:    envelope{"token": token},
+
+		// data envelope sent to front end to be able to store user amd token as cookie
+		Data: envelope{"token": token, "user": user},
 	}
 
 	//We use our write json func we created at helper.go

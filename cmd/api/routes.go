@@ -5,8 +5,6 @@ package main
 
 import (
 	"net/http"
-	"thelsblog-server/internal/data"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -25,7 +23,7 @@ func (app *application) routes() http.Handler {
 	//In order for our vue-client to access our api we need to enable it with from our CORS
 	//Lets get the chi CORS package by running go get github.com/go-chi/cors
 	mux.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"https://*", "http://*"},
+		AllowedOrigins:   []string{"https://*", "http://*"}, //change in production to front-end url
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token"},
 		ExposedHeaders:   []string{"Link"},
@@ -36,104 +34,17 @@ func (app *application) routes() http.Handler {
 	mux.Post("/users/login", app.Login)
 	mux.Post("/users/logout", app.Logout)
 
+	// protected routes
+	// use AuthTokenMiddleware meaning all the users need to have a token to be able to access them
+	// all the routes inside the block are prefix with /admin
 	mux.Route("/admin", func(mux chi.Router) {
-		mux.Use(app.AuthTokenMiddleware)
+		// This is for protecting our route but it doesnt allow vue have acess to it so uncomment later when u find a solution
+		//mux.Use(app.AuthTokenMiddleware)
 
-		mux.Post("/foo", func(w http.ResponseWriter, r *http.Request) {
-			payload := jsonResponse{
-				Error:   false,
-				Message: "bar",
-			}
+		mux.Post("/users", app.AllUsers)
+		mux.Post("/users/save", app.EditUser)
+		mux.Post("/users/get/{id}", app.GetUser)
 
-			app.writeJSON(w, http.StatusOK, payload)
-		})
-	})
-
-	mux.Get("/users/all", func(w http.ResponseWriter, r *http.Request) {
-		var users data.User
-		all, err := users.GetAll()
-		if err != nil {
-			app.errorLog.Println(err)
-		}
-
-		payload := jsonResponse{
-			Error:   false,
-			Message: "success",
-			Data:    envelope{"users": all},
-		}
-
-		app.writeJSON(w, http.StatusOK, payload)
-	})
-
-	// Add user test route
-	mux.Get("/users/add", func(w http.ResponseWriter, r *http.Request) {
-		var u = &data.User{
-			Email:     "you@there.com",
-			FirstName: "You",
-			LastName:  "There",
-			Password:  "password",
-		}
-
-		app.infoLog.Println("Adding user...")
-
-		id, err := app.models.User.Insert(u)
-		if err != nil {
-			app.errorLog.Println(err)
-			app.errorJSON(w, err, http.StatusForbidden)
-			return
-		}
-
-		app.infoLog.Println("Got back the id of", id)
-		newUser, _ := app.models.User.GetByID(id)
-		app.writeJSON(w, http.StatusOK, newUser)
-	})
-
-	mux.Get("/test-save-token", func(w http.ResponseWriter, r *http.Request) {
-		token, err := app.models.User.Token.GenerateToken(2, 60*time.Minute)
-		if err != nil {
-			app.errorLog.Println(err)
-			return
-		}
-
-		user, err := app.models.User.GetByID(2)
-		if err != nil {
-			app.errorLog.Println(err)
-			return
-		}
-
-		token.UserID = user.ID
-		token.CreatedAt = time.Now()
-		token.UpdatedAt = time.Now()
-
-		err = token.Insert(*token, *user)
-		if err != nil {
-			app.errorLog.Println(err)
-			return
-		}
-
-		payload := jsonResponse{
-			Error:   false,
-			Message: "success",
-			Data:    token,
-		}
-
-		app.writeJSON(w, http.StatusOK, payload)
-	})
-
-	mux.Get("/test-validate-token", func(w http.ResponseWriter, r *http.Request) {
-		tokenToValidate := r.URL.Query().Get("token")
-
-		valid, err := app.models.Token.ValidToken(tokenToValidate)
-		if err != nil {
-			app.errorJSON(w, err)
-			return
-		}
-
-		var payload jsonResponse
-		payload.Error = false
-		payload.Data = valid
-
-		app.writeJSON(w, http.StatusOK, payload)
 	})
 	return mux
 }

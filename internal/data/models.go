@@ -45,7 +45,7 @@ type User struct {
 }
 
 // Query to get all users
-// we are returning all of the user field(email, id, firstname etc), so we need to use a slice of the struct User to access everything in it
+// we are returning a slice of all of the user, sorted by last name
 func (u *User) GetAll() ([]*User, error) {
 	// Important to shut down db once Query operation is carried out
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
@@ -123,7 +123,7 @@ func (u *User) GetByEmail(email string) (*User, error) {
 	return &user, nil
 }
 
-// Get a (one) user by their ID
+// Get (one) user by their ID
 func (u *User) GetByID(id int) (*User, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
@@ -206,7 +206,7 @@ func (u *User) Delete() error {
 }
 
 // Insert New user into the database and return their ID
-func (u *User) Insert(user *User) (int, error) {
+func (u *User) Insert(user User) (int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
 

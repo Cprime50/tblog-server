@@ -1,14 +1,20 @@
 package main
 
 import (
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"thelsblog-server/internal/data"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/mozillazg/go-slugify"
 )
+
+var staticPath = "./static/"
 
 type jsonResponse struct {
 	Error   bool        `json:"error"`
@@ -51,6 +57,11 @@ func (app *application) Login(w http.ResponseWriter, r *http.Request) {
 	validPassword, err := user.PasswordMatches(creds.Password)
 	if err != nil || !validPassword {
 		app.errorJSON(w, errors.New("invalid username/password"))
+		return
+	}
+	// make sure user is active
+	if user.Active == 0 {
+		app.errorJSON(w, errors.New("user is not active"))
 		return
 	}
 
@@ -152,6 +163,7 @@ func (app *application) EditUser(w http.ResponseWriter, r *http.Request) {
 		u.Email = user.Email
 		u.FirstName = user.FirstName
 		u.LastName = user.LastName
+		u.Active = user.Active
 
 		if err := u.Update(); err != nil {
 			app.errorJSON(w, err)
@@ -190,4 +202,191 @@ func (app *application) GetUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = app.writeJSON(w, http.StatusOK, user)
+}
+
+func (app *application) DeleteUser(w http.ResponseWriter, r *http.Request) {
+	var requestPayload struct {
+		ID int `json:"id"`
+	}
+
+	err := app.readJSON(w, r, &requestPayload)
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	err = app.models.User.DeleteByID(requestPayload.ID)
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	payload := jsonResponse{
+		Error:   false,
+		Message: "User deleted",
+	}
+
+	_ = app.writeJSON(w, http.StatusOK, payload)
+}
+
+// set a user as inactive when hey are log out
+func (app *application) LogUserOutAndSetInactive(w http.ResponseWriter, r *http.Request) {
+	//gets userID
+	userID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	user, err := app.models.User.GetByID(userID)
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	// Sets user to inactive and saves to the database
+	user.Active = 0
+	err = user.Update()
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	//delete token for user
+	err = app.models.Token.DeleteTokensForUser(userID)
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	payload := jsonResponse{
+		Error:   false,
+		Message: "user logged out and set to inactive",
+	}
+
+	_ = app.writeJSON(w, http.StatusAccepted, payload)
+}
+
+func (app *application) ValidateToken(w http.ResponseWriter, r *http.Request) {
+	var requestPayload struct {
+		Token string `json:"token"`
+	}
+
+	err := app.readJSON(w, r, &requestPayload)
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	valid := false
+	valid, _ = app.models.Token.ValidToken(requestPayload.Token)
+
+	payload := jsonResponse{
+		Error: false,
+		Data:  valid,
+	}
+
+	_ = app.writeJSON(w, http.StatusOK, payload)
+}
+
+// Display a list of all our blogs
+func (app *application) AllBlogs(w http.ResponseWriter, r *http.Request) {
+	blogs, err := app.models.Blog.GetAll()
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	payload := jsonResponse{
+		Error:   false,
+		Message: "success",
+		Data:    envelope{"blogs": blogs},
+	}
+
+	app.writeJSON(w, http.StatusOK, payload)
+}
+
+// Get only one blog based on their slug
+func (app *application) OneBlog(w http.ResponseWriter, r *http.Request) {
+	slug := chi.URLParam(r, "slug")
+
+	blog, err := app.models.Blog.GetOneBySlug(slug)
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	payload := jsonResponse{
+		Error: false,
+		Data:  blog,
+	}
+
+	app.writeJSON(w, http.StatusOK, payload)
+}
+
+// get all creators
+func (app *application) EditBlog(w http.ResponseWriter, r *http.Request) {
+	var requestPayload struct {
+		ID           int    `json:"id"`
+		Title        string `json:"title"`
+		CreatedByID  int    `json:"createdby_id"`
+		Description  string `json:"description"`
+		Content      string `json:"content"`
+		BannerBase64 string `json:"banner"`
+		CategoryIDs  []int  `json:"category_ids"`
+	}
+
+	err := app.readJSON(w, r, &requestPayload)
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	blog := data.Blog{
+		ID:          requestPayload.ID,
+		Title:       requestPayload.Title,
+		CreatedByID: requestPayload.CreatedByID,
+		Description: requestPayload.Description,
+		Content:     requestPayload.Content,
+		Slug:        slugify.Slugify(requestPayload.Title),
+		CategoryIDs: requestPayload.CategoryIDs,
+	}
+
+	// image decoding
+	if len(requestPayload.BannerBase64) > 0 {
+		decoded, err := base64.StdEncoding.DecodeString(requestPayload.BannerBase64)
+		if err != nil {
+			app.errorJSON(w, err)
+			return
+		}
+
+		// write image to /static/banners
+		if err := os.WriteFile(fmt.Sprintf("%s/banners/%s.jpg", staticPath, blog.Slug), decoded, 0666); err != nil {
+			app.errorJSON(w, err)
+			return
+		}
+
+		if blog.ID == 0 {
+			// adding a blog
+			_, err := app.models.Blog.Create(blog)
+			if err != nil {
+				app.errorJSON(w, err)
+				return
+			}
+		} else {
+			// update a blog
+			err := blog.Update()
+			if err != nil {
+				app.errorJSON(w, err)
+				return
+			}
+		}
+	}
+
+	payload := jsonResponse{
+		Error:   false,
+		Message: "Changes saved",
+	}
+
+	app.writeJSON(w, http.StatusAccepted, payload)
 }

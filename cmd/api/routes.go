@@ -33,6 +33,11 @@ func (app *application) routes() http.Handler {
 
 	mux.Post("/users/login", app.Login)
 	mux.Post("/users/logout", app.Logout)
+	mux.Post("/validate-token", app.ValidateToken)
+	//mux.Post("/blogs", app.AllBlogs)
+
+	mux.Get("/blogs", app.AllBlogs)
+	mux.Get("/blogs/{slug}", app.OneBlog)
 
 	// protected routes
 	// use AuthTokenMiddleware meaning all the users need to have a token to be able to access them
@@ -44,7 +49,17 @@ func (app *application) routes() http.Handler {
 		mux.Post("/users", app.AllUsers)
 		mux.Post("/users/save", app.EditUser)
 		mux.Post("/users/get/{id}", app.GetUser)
+		mux.Post("/users/delete", app.DeleteUser)
+		mux.Post("/log-user-out/{id}", app.LogUserOutAndSetInactive)
+
+		//admin blog routes
+		mux.Post("/blogs/save", app.EditBlog)
 
 	})
+
+	// static files
+	fileServer := http.FileServer(http.Dir("./static/"))
+	mux.Handle("/static/*", http.StripPrefix("/static", fileServer))
+
 	return mux
 }

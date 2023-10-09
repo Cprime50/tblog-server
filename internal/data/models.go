@@ -25,12 +25,14 @@ func New(dbPool *sql.DB) Models {
 	return Models{
 		User:  User{},
 		Token: Token{},
+		Blog:  Blog{},
 	}
 }
 
 type Models struct {
 	User  User
 	Token Token
+	Blog  Blog
 }
 
 type User struct {
@@ -39,6 +41,7 @@ type User struct {
 	FirstName string    `json:"first_name,omitempty"`
 	LastName  string    `json:"last_name,omitempty"`
 	Password  string    `json:"password"`
+	Active    int       `json:"active"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Token     Token     `json:"token"`
@@ -52,7 +55,12 @@ func (u *User) GetAll() ([]*User, error) {
 	defer cancel()
 
 	// SQL query statement that will be passed as a parameter to our db Query context
-	query := `select id, email, first_name, last_name, password, created_at, updated_at  from users order by last_name`
+	query := `select id, email, first_name, last_name, password, user_active, created_at, updated_at , 
+	case 
+		when (select count(id) from tokens t where user_id = users.id and t.expiry > NOW()) > 0 then 1
+		else 0
+	end as has_token
+	from users order by last_name`
 
 	// Query every row for users and close when  done
 	rows, err := db.QueryContext(ctx, query)
@@ -73,8 +81,10 @@ func (u *User) GetAll() ([]*User, error) {
 			&user.FirstName,
 			&user.LastName,
 			&user.Password,
+			&user.Active,
 			&user.CreatedAt,
 			&user.UpdatedAt,
+			&user.Token.ID,
 		)
 		if err != nil {
 			return nil, err
@@ -94,7 +104,7 @@ func (u *User) GetByEmail(email string) (*User, error) {
 	defer cancel()
 
 	//SQL query
-	query := `select id, email, first_name, last_name, password, created_at, updated_at from users where email = $1`
+	query := `select id, email, first_name, last_name, password, created_at, updated_at, user_active from users where email = $1`
 
 	// variable for User type the function will return
 	var user User
@@ -112,6 +122,7 @@ func (u *User) GetByEmail(email string) (*User, error) {
 		&user.Password,
 		&user.CreatedAt,
 		&user.UpdatedAt,
+		&user.Active,
 	)
 
 	// if error
@@ -128,7 +139,7 @@ func (u *User) GetByID(id int) (*User, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
 
-	query := `select id, email, first_name, last_name, password, created_at, updated_at from users where id = $1`
+	query := `select id, email, first_name, last_name, password, user_active, created_at, updated_at from users where id = $1`
 
 	// variable for User type the function will return
 	var user User
@@ -143,6 +154,7 @@ func (u *User) GetByID(id int) (*User, error) {
 		&user.FirstName,
 		&user.LastName,
 		&user.Password,
+		&user.Active,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
@@ -163,13 +175,14 @@ func (u *User) Update() error {
 
 	// next sql statement, this time not a query to return anything but a statement bc we are updating
 	// You can also namae the variable query or leave as stmt(statement)
-	// Remember in SQL dont put a comma (,) before the where id
+	// Remember in SQL dont put a comma (,) before the last column and at the last column
 	stmt := `update users set
 			email = $1,
 			first_name = $2,
 			last_name = $3,
-			updated_at =$4
-			where id = $5
+			user_active = $4,
+			updated_at =$5
+			where id = $6
 			`
 
 	//ExecContext doesnt return anything, we just want to query for errors and nit return anything
@@ -177,6 +190,7 @@ func (u *User) Update() error {
 		u.Email,
 		u.FirstName,
 		u.LastName,
+		u.Active,
 		time.Now(),
 		u.ID,
 	)
@@ -188,7 +202,7 @@ func (u *User) Update() error {
 	return nil
 }
 
-// Delete user by ID
+// Delete user from db by ID
 func (u *User) Delete() error {
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
@@ -196,6 +210,24 @@ func (u *User) Delete() error {
 	stmt := `delete from users where id = $1`
 
 	_, err := db.ExecContext(ctx, stmt, u.ID)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+
+}
+
+// Delete by ID
+// compared to the delete func this deletes the id instantly instead of first making a call to the db
+func (u *User) DeleteByID(id int) error {
+	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
+	defer cancel()
+
+	stmt := `delete from users where id = $1`
+
+	_, err := db.ExecContext(ctx, stmt, id)
 
 	if err != nil {
 		return err
@@ -219,8 +251,8 @@ func (u *User) Insert(user User) (int, error) {
 	// variable to store the new user ID
 	var newID int
 
-	stmt := `insert into users (email, first_name, last_name, password, created_at, updated_at)
-			values ($1, $2, $3, $4 , $5, $6) returning id
+	stmt := `insert into users (email, first_name, last_name, password, user_active, created_at, updated_at )
+			values ($1, $2, $3, $4 , $5, $6, $7) returning id
 			`
 
 	err = db.QueryRowContext(ctx, stmt,
@@ -228,6 +260,7 @@ func (u *User) Insert(user User) (int, error) {
 		user.FirstName,
 		user.LastName,
 		hashedPassword,
+		u.Active,
 		time.Now(),
 		time.Now(),
 	).Scan(&newID)
@@ -331,7 +364,7 @@ func (t *Token) GetUserForToken(plainText string) (*User, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
 
-	query := `select id, email, first_name, last_name, password, created_at, updated_at from users where email = $1`
+	query := `select id, email, first_name, last_name, password, user_active, created_at, updated_at from users where email = $1`
 
 	// variable for User type the function will return
 	var user User
@@ -346,6 +379,7 @@ func (t *Token) GetUserForToken(plainText string) (*User, error) {
 		&user.FirstName,
 		&user.LastName,
 		&user.Password,
+		&user.Active,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)
@@ -421,10 +455,15 @@ func (t *Token) AuthenticateToken(r *http.Request) (*User, error) {
 	if err != nil {
 		return nil, errors.New("no matching user found")
 	}
+
+	if user.Active == 0 {
+		return nil, errors.New("user not active")
+	}
+
 	return user, nil
 }
 
-// insert token
+// insert token creates a token
 func (t *Token) Insert(token Token, u User) error {
 	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 	defer cancel()
@@ -438,7 +477,7 @@ func (t *Token) Insert(token Token, u User) error {
 
 	token.Email = u.Email
 
-	stmt = `insert into tokens (user_id, email, token, token_hash, created_at,  updated_at, expiry)
+	stmt = `INSERT into tokens (user_id, email, token, token_hash, created_at,  updated_at, expiry)
 		values ($1, $2, $3, $4 , $5, $6, $7)`
 
 	_, err = db.ExecContext(ctx, stmt,
@@ -472,6 +511,22 @@ func (t *Token) DeleteByToken(plainText string) error {
 	return nil
 }
 
+func (t *Token) DeleteTokensForUser(id int) error {
+	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
+	defer cancel()
+
+	stmt := "delete from tokens where user_id = $1"
+	_, err := db.ExecContext(ctx, stmt, id)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// ValidToken makes certain that a given token is valid; in order to be valid,
+// the token must exist in the database, the associated user must exist in the database
+// and the token must not have expired
 func (t *Token) ValidToken(plainText string) (bool, error) {
 	token, err := t.GetByToken(plainText)
 	if err != nil {

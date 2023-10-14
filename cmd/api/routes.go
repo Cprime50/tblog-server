@@ -54,6 +54,8 @@ func (app *application) routes() http.Handler {
 
 		//admin blog routes
 		mux.Post("/blogs/save", app.EditBlog)
+		mux.Post("/blogs/{id}", app.BlogByID)
+		mux.Post("/blogs/delete", app.DeleteBlog)
 
 	})
 

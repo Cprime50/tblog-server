@@ -352,8 +352,9 @@ func (app *application) EditBlog(w http.ResponseWriter, r *http.Request) {
 		CategoryIDs: requestPayload.CategoryIDs,
 	}
 
-	// image decoding
+	// image decoding to check if we have a banner
 	if len(requestPayload.BannerBase64) > 0 {
+		// we have a banner
 		decoded, err := base64.StdEncoding.DecodeString(requestPayload.BannerBase64)
 		if err != nil {
 			app.errorJSON(w, err)
@@ -366,20 +367,21 @@ func (app *application) EditBlog(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if blog.ID == 0 {
-			// adding a blog
-			_, err := app.models.Blog.Create(blog)
-			if err != nil {
-				app.errorJSON(w, err)
-				return
-			}
-		} else {
-			// update a blog
-			err := blog.Update()
-			if err != nil {
-				app.errorJSON(w, err)
-				return
-			}
+	}
+
+	if blog.ID == 0 {
+		// adding a blog
+		_, err := app.models.Blog.Create(blog)
+		if err != nil {
+			app.errorJSON(w, err)
+			return
+		}
+	} else {
+		// update a blog
+		err := blog.Update()
+		if err != nil {
+			app.errorJSON(w, err)
+			return
 		}
 	}
 
@@ -389,4 +391,52 @@ func (app *application) EditBlog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.writeJSON(w, http.StatusAccepted, payload)
+}
+
+// get blog by id
+func (app *application) BlogByID(w http.ResponseWriter, r *http.Request) {
+	blogID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	blog, err := app.models.Blog.GetOneById(blogID)
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	payload := jsonResponse{
+		Error: false,
+		Data:  blog,
+	}
+	app.writeJSON(w, http.StatusOK, payload)
+
+}
+
+// delete blog
+func (app *application) DeleteBlog(w http.ResponseWriter, r *http.Request) {
+	var requestPayload struct {
+		ID int `json:"id"`
+	}
+
+	err := app.readJSON(w, r, &requestPayload.ID)
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	err = app.models.Blog.DeleteByID(requestPayload.ID)
+	if err != nil {
+		app.errorJSON(w, err)
+		return
+	}
+
+	payload := jsonResponse{
+		Error:   false,
+		Message: "Blog Deleted",
+	}
+
+	app.writeJSON(w, http.StatusOK, payload)
 }

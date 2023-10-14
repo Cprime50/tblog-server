@@ -65,7 +65,7 @@ func (app *application) writeJSON(w http.ResponseWriter, status int, data interf
 }
 
 // errorJSON takes an error, and optionally a response status code, and generates and sends a json error response
-func (app *application) errorJSON(w http.ResponseWriter, err error, status ...int) {
+func (app *application) errorJSON(w http.ResponseWriter, err error, status ...int) error {
 	statusCode := http.StatusBadRequest
 
 	if len(status) > 0 {
@@ -96,4 +96,6 @@ func (app *application) errorJSON(w http.ResponseWriter, err error, status ...in
 	payload.Message = customErr.Error()
 
 	app.writeJSON(w, statusCode, payload)
+
+	return nil
 }
